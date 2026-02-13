@@ -1,0 +1,110 @@
+name: Build ServiceGuardian
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.4)'
+        required: true
+        default: '1.0.4'
+
+  # 从 ServiceGuardian 仓库接收 webhook 触发
+  repository_dispatch:
+    types: [serviceguardian-updated]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout ServiceGuardian source code
+      uses: actions/checkout@v4
+      with:
+        repository: simtelboy/ServiceGuardian
+        token: ${{ secrets.SERVICEGUARDIAN_TOKEN }}
+        path: ServiceGuardian
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+
+    - name: Configure CMake
+      working-directory: ServiceGuardian
+      run: |
+        mkdir build
+        cd build
+        cmake .. -G "Visual Studio 17 2022" -A x64
+
+    - name: Build Release
+      working-directory: ServiceGuardian/build
+      run: cmake --build . --config Release
+
+    - name: Get version
+      id: version
+      run: |
+        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          $version = "${{ github.event.inputs.version }}"
+        } else {
+          # 从 ServiceGuardian 仓库获取最新的 tag 或使用日期
+          cd ServiceGuardian
+          $tag = git describe --tags --abbrev=0 2>$null
+          if ($tag) {
+            $version = $tag
+          } else {
+            $version = "1.0.$(Get-Date -Format 'yyyyMMdd')"
+          }
+        }
+        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+        echo "Release version: $version"
+
+    - name: Prepare release files
+      run: |
+        mkdir release
+        Copy-Item ServiceGuardian/build/bin/Release/ServiceGuardian.exe release/
+
+        # 创建版本信息文件
+        $version = "${{ steps.version.outputs.VERSION }}"
+        $buildDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $commitHash = cd ServiceGuardian; git rev-parse --short HEAD
+
+        @"
+        ServiceGuardian v$version
+        Build Date: $buildDate
+        Commit: $commitHash
+
+        AI服务守护进程 - 自动编译版本
+        "@ | Out-File -FilePath release/BUILD_INFO.txt -Encoding UTF8
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.VERSION }}
+        name: ServiceGuardian v${{ steps.version.outputs.VERSION }}
+        body: |
+          ## ServiceGuardian v${{ steps.version.outputs.VERSION }}
+
+          自动编译的 ServiceGuardian 发布版本
+
+          ### 下载
+          - [ServiceGuardian.exe](https://github.com/simtelboy/ai-toolkit/releases/download/v${{ steps.version.outputs.VERSION }}/ServiceGuardian.exe)
+
+          ### 变更
+          此版本从 [ServiceGuardian](https://github.com/simtelboy/ServiceGuardian) 仓库自动编译生成。
+
+          查看完整变更日志请访问源代码仓库。
+        files: |
+          release/ServiceGuardian.exe
+          release/BUILD_INFO.txt
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ServiceGuardian-v${{ steps.version.outputs.VERSION }}
+        path: release/
