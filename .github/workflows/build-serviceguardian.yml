@@ -74,7 +74,11 @@ jobs:
         # 创建版本信息文件
         $version = "${{ steps.version.outputs.VERSION }}"
         $buildDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        $commitHash = cd ServiceGuardian; git rev-parse --short HEAD
+
+        # 获取 commit hash（不改变当前目录）
+        Push-Location ServiceGuardian
+        $commitHash = git rev-parse --short HEAD
+        Pop-Location
 
         @"
         ServiceGuardian v$version
