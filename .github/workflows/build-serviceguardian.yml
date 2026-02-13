@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 1.0.4)'
-        required: true
-        default: '1.0.4'
+        description: 'Release version (留空则自动从源代码读取)'
+        required: false
+        default: ''
 
   # 从 ServiceGuardian 仓库接收 webhook 触发
   repository_dispatch:
@@ -42,23 +42,29 @@ jobs:
       working-directory: ServiceGuardian/build
       run: cmake --build . --config Release
 
-    - name: Get version
+    - name: Get version from source code
       id: version
       run: |
-        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-          $version = "${{ github.event.inputs.version }}"
+        # 从 C++ 源代码中提取版本号
+        $sourceFile = "ServiceGuardian/ServiceGuardian.cpp"
+        $content = Get-Content $sourceFile -Raw
+
+        if ($content -match '#define\s+APP_VERSION\s+L"([^"]+)"') {
+          $version = $matches[1]
+          echo "✅ 从源代码中提取到版本号: $version"
         } else {
-          # 从 ServiceGuardian 仓库获取最新的 tag 或使用日期
-          cd ServiceGuardian
-          $tag = git describe --tags --abbrev=0 2>$null
-          if ($tag) {
-            $version = $tag
-          } else {
-            $version = "1.0.$(Get-Date -Format 'yyyyMMdd')"
-          }
+          echo "⚠️ 无法从源代码提取版本号，使用默认版本"
+          $version = "1.0.0"
         }
+
+        # 如果是手动触发且指定了版本号，使用指定的版本号
+        if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.version }}" -ne "") {
+          $version = "${{ github.event.inputs.version }}"
+          echo "✅ 使用手动指定的版本号: $version"
+        }
+
         echo "VERSION=$version" >> $env:GITHUB_OUTPUT
-        echo "Release version: $version"
+        echo "📦 Release version: $version"
 
     - name: Prepare release files
       run: |
